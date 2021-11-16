@@ -1,0 +1,13 @@
+{
+  "domain": "mitemphumidity",
+  "name": "Mi Temperature and Humidity sensor 2",
+  "documentation": "https://github.com/yakhira/mitemphumidity",
+  "issue_tracker": "https://github.com/yakhira/mitemphumidity/issues",
+  "dependencies": ["pexpect"],
+  "config_flow": true,
+  "iot_class": "local_push",
+  "codeowners": [
+    "@yakhira"
+  ],
+  "version": "0.1.0"
+}

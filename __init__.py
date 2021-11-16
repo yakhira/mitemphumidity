@@ -1,0 +1,1 @@
+"""Mi Temperature and Humidity Sensor 2 integration."""
