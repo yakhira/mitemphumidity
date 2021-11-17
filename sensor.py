@@ -3,7 +3,7 @@ import logging
 import pexpect
 import voluptuous as vol
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
@@ -13,7 +13,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
 )
 from homeassistant.const import (
-    CONF_FORCE_UPDATE,
     CONF_MAC,
     CONF_MONITORED_CONDITIONS,
     CONF_NAME,
@@ -52,13 +51,7 @@ SENSOR_TYPES: tuple[SensorEntityDescription] = (
         name="Humidity",
         device_class=DEVICE_CLASS_HUMIDITY,
         native_unit_of_measurement=PERCENTAGE,
-    ),
-    SensorEntityDescription(
-        key="battery",
-        name="Battery",
-        device_class=DEVICE_CLASS_BATTERY,
-        native_unit_of_measurement=PERCENTAGE,
-    ),
+    )
 )
 
 SENSOR_KEYS = [desc.key for desc in SENSOR_TYPES]
@@ -88,14 +81,14 @@ class MiTempHumidity(SensorEntity):
 
     def __init__(self, config, sensor):
         """Initialize the sensor."""
-        self._name = config['name']
+        self._prefix = config['name']
         self._mac = config['mac']
         self._adapter = config['adapter']
-        self._timeout = config['timeout']
-        self._retries = config['retries']
+        self._timeout = int(config['timeout'])
+        self._retries = int(config['retries'])
         self._sensor = sensor
 
-        self._cache_timeout = 600
+        self._cache_timeout = timedelta(seconds=600)
         self._cache_data = {}
         self._last_read = None
 
@@ -104,7 +97,7 @@ class MiTempHumidity(SensorEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return self._name
+        return f'{self._prefix}_{self._sensor.key}'
 
     @property
     def state(self):
@@ -118,7 +111,7 @@ class MiTempHumidity(SensorEntity):
 
     def update(self):
         """Update data."""
-        if (datetime.now() - self._cache_timeout) > self._last_read:
+        if not self._last_read or (datetime.now() - self._cache_timeout) > self._last_read:
             data = None
             retry = 0
 
@@ -128,17 +121,17 @@ class MiTempHumidity(SensorEntity):
                         _HANDLE_READ_WRITE_SENSOR_DATA[0],
                         _HANDLE_READ_WRITE_SENSOR_DATA[1]
                     )
-                    self._last_read = datetime.now()
                     self._cache_data = data
                 except pexpect.exceptions.TIMEOUT: 
                     _LOGGER.debug(f'Timed out, retry {retry}.')
                     retry += 1
+            self._last_read = datetime.now()
         else:
             _LOGGER.debug(
                 f'Using cache ({datetime.now() - self._last_read} < {self._cache_timeout})'
             )
 
-        _LOGGER.debug(f'{self.name} = {self._cache_data}')
+        _LOGGER.debug(f'{self._prefix}_{self._sensor.key} = {self._cache_data}')
     
     def _get_sensor_data(self, handle, value):
         self._gatt.sendline('connect')
