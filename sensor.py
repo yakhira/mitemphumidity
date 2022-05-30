@@ -91,8 +91,6 @@ class MiTempHumidity(SensorEntity):
         self._cache_data = {}
         self._last_read = None
 
-        self._gatt = pexpect.spawn(f'gatttool -i {self._adapter} -b {self._mac} -I')
-
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
@@ -133,6 +131,7 @@ class MiTempHumidity(SensorEntity):
         _LOGGER.debug(f'{self._prefix}_{self._sensor.key} = {self._cache_data}')
     
     def _get_sensor_data(self, handle, value):
+        self._gatt = pexpect.spawn(f'gatttool -i {self._adapter} -b {self._mac} -I')
         self._gatt.sendline('connect')
         self._gatt.expect('Connection successful', timeout = self._timeout)
         self._gatt.sendline(f'char-write-req {handle} {value}')
@@ -141,6 +140,7 @@ class MiTempHumidity(SensorEntity):
         self._gatt.expect("\r\n")
         sensor_data = self._gatt.before.decode().split(' ')
         self._gatt.sendline('disconnect')
+        self._gatt.close()
 
         return  {
             'temperature': int(f'{sensor_data[1]}{sensor_data[0]}', 16)/100,
