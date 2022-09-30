@@ -87,7 +87,7 @@ class MiTempHumidity(SensorEntity):
         self._retries = int(config['retries'])
         self._sensor = sensor
 
-        self._cache_timeout = timedelta(seconds=600)
+        self._cache_timeout = timedelta(seconds=900)
         self._cache_data = {}
         self._last_read = None
 
