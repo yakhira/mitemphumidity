@@ -122,6 +122,11 @@ class MiTempHumidity(SensorEntity):
                 except pexpect.exceptions.TIMEOUT: 
                     _LOGGER.debug(f'Timed out, retry {retry}.')
                     retry += 1
+                except pexpect.exceptions.EOF: 
+                    _LOGGER.debug('End Of File (EOF). Exception style platform.')
+                    retry += 1
+                finally:
+                    self._gatt.close()
             self._last_read = datetime.now()
         else:
             _LOGGER.debug(
@@ -131,16 +136,13 @@ class MiTempHumidity(SensorEntity):
         _LOGGER.debug(f'{self._prefix}_{self._sensor.key} = {self._cache_data}')
     
     def _get_sensor_data(self, handle, value):
-        self._gatt = pexpect.spawn(f'gatttool -i {self._adapter} -b {self._mac} -I')
-        self._gatt.sendline('connect')
-        self._gatt.expect('Connection successful', timeout = self._timeout)
-        self._gatt.sendline(f'char-write-req {handle} {value}')
-        self._gatt.expect('Characteristic value was written successfully')
-        self._gatt.expect('Notification handle = 0x0036 value: ')
-        self._gatt.expect("\r\n")
+        self._gatt = pexpect.spawn(
+            f'gatttool -i {self._adapter} -b {self._mac} --char-read --handle={handle} --value={value} --listen'
+        )
+        self._gatt.expect('Characteristic value/descriptor: 01 00', timeout = self._timeout)
+        self._gatt.expect('Notification handle = 0x0036 value: ', timeout = self._timeout)
+        self._gatt.expect("\r\n", timeout = self._timeout)
         sensor_data = self._gatt.before.decode().split(' ')
-        self._gatt.sendline('disconnect')
-        self._gatt.close()
 
         return  {
             'temperature': int(f'{sensor_data[1]}{sensor_data[0]}', 16)/100,
