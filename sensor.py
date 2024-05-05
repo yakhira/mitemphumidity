@@ -1,6 +1,6 @@
 """Platform for Mi Temperature and Humidity 2 integration."""
 import logging
-import pexpect
+import os
 import voluptuous as vol
 
 from datetime import datetime, timedelta
@@ -11,12 +11,12 @@ from homeassistant.components.sensor import (
     PLATFORM_SCHEMA,
     SensorEntity,
     SensorEntityDescription,
+    SensorDeviceClass,
 )
 from homeassistant.const import (
     CONF_MAC,
     CONF_MONITORED_CONDITIONS,
     CONF_NAME,
-    CONF_TIMEOUT,
     PERCENTAGE,
 )
 
@@ -24,18 +24,15 @@ from homeassistant.const import UnitOfTemperature
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_NAME = 'name'
-CONF_MAC = 'mac'
-CONF_ADAPTER = 'adapter'
-CONF_RETRIES = 'retries'
-CONF_TIMEOUT = 'timeout'
+CONF_NAME = "name"
+CONF_MAC = "mac"
+CONF_ADAPTER = "adapter"
 
-DEFAULT_ADAPTER = 'hci0'
-DEFAULT_NAME = 'MiTempHumidity'
-DEFAULT_TIMEOUT = 10
-DEFAULT_RETRIES = 5
+DEFAULT_ADAPTER = "hci0"
+DEFAULT_NAME = "MiTempHumidity"
 
-_HANDLE_READ_WRITE_SENSOR_DATA = '0x0038', '0100'
+HANDLE_DATA = "0x0033", "0100"
+SCAN_INTERVAL = timedelta(minutes=5)
 
 SENSOR_TYPES: tuple[SensorEntityDescription] = (
     SensorEntityDescription(
@@ -57,18 +54,15 @@ SENSOR_KEYS = [desc.key for desc in SENSOR_TYPES]
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_ADAPTER, default=DEFAULT_ADAPTER): cv.string,
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-    vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.string,
-    vol.Optional(CONF_RETRIES, default=DEFAULT_RETRIES): cv.string,
-    vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     vol.Optional(CONF_MONITORED_CONDITIONS, default=SENSOR_KEYS): vol.All(
         cv.ensure_list, [vol.In(SENSOR_KEYS)]
     ),
     vol.Required(CONF_MAC): cv.string
 })
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the Mi Temperature and Humidity 2 platform."""
-    add_entities([
+    async_add_entities([
         MiTempHumidity(config, sensor)
         for sensor in SENSOR_TYPES
         if sensor.key in config[CONF_MONITORED_CONDITIONS]
@@ -79,71 +73,42 @@ class MiTempHumidity(SensorEntity):
 
     def __init__(self, config, sensor):
         """Initialize the sensor."""
-        self._prefix = config['name']
-        self._mac = config['mac']
-        self._adapter = config['adapter']
-        self._timeout = int(config['timeout'])
-        self._retries = int(config['retries'])
+        self._prefix = config["name"]
+        self._mac = config["mac"]
+        self._adapter = config["adapter"]
         self._sensor = sensor
-
-        self._cache_timeout = timedelta(seconds=900)
-        self._cache_data = {}
-        self._last_read = None
+        self._data = {}
 
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return f'{self._prefix}_{self._sensor.key}'
+        return f"{self._prefix}_{self._sensor.key}"
 
     @property
     def state(self):
         """Return the state of the sensor."""
-        return self._cache_data.get(self._sensor.key, 0)
+        return self._data.get(self._sensor.key, 0)
     
     @property
     def unit_of_measurement(self) -> str:
         """Return the unit of measurement."""
         return self._sensor.native_unit_of_measurement
 
-    def update(self):
+    async def async_update(self):
         """Update data."""
-        if not self._last_read or (datetime.now() - self._cache_timeout) > self._last_read:
-            data = None
-            retry = 0
-
-            while data == None and retry < self._retries:
-                try:
-                    data = self._get_sensor_data(
-                        _HANDLE_READ_WRITE_SENSOR_DATA[0],
-                        _HANDLE_READ_WRITE_SENSOR_DATA[1]
-                    )
-                    self._cache_data = data
-                except pexpect.exceptions.TIMEOUT: 
-                    _LOGGER.debug(f'Timed out, retry {retry}.')
-                    retry += 1
-                except pexpect.exceptions.EOF: 
-                    _LOGGER.debug('End Of File (EOF). Exception style platform.')
-                    retry += 1
-                finally:
-                    self._gatt.close()
-            self._last_read = datetime.now()
-        else:
-            _LOGGER.debug(
-                f'Using cache ({datetime.now() - self._last_read} < {self._cache_timeout})'
-            )
-
-        _LOGGER.debug(f'{self._prefix}_{self._sensor.key} = {self._cache_data}')
-    
-    def _get_sensor_data(self, handle, value):
-        self._gatt = pexpect.spawn(
-            f'gatttool -i {self._adapter} -b {self._mac} --char-read --handle={handle} --value={value} --listen'
+        results = os.popen(
+            f"gatttool -i {self._adapter} -b {self._mac} --char-read --handle={HANDLE_DATA[0]} --value={HANDLE_DATA[1]}",
+            mode="r"
         )
-        self._gatt.expect('Characteristic value/descriptor: 01 00', timeout = self._timeout)
-        self._gatt.expect('Notification handle = 0x0036 value: ', timeout = self._timeout)
-        self._gatt.expect("\r\n", timeout = self._timeout)
-        sensor_data = self._gatt.before.decode().split(' ')
+        sensor_data = results.read()
+        
+        if not results.close():
+            sensor_data = sensor_data.split(":")
+            if len(sensor_data) == 2:
+                sensor_data = sensor_data[1].strip().split(" ")
 
-        return  {
-            'temperature': int(f'{sensor_data[1]}{sensor_data[0]}', 16)/100,
-            'humidity': int(f'{sensor_data[2]}', 16)
-        }
+                self._data = {
+                    "temperature": int(f"{sensor_data[1]}{sensor_data[0]}", 16)/100,
+                    "humidity": int(f"{sensor_data[2]}", 16)
+                }
+        return self._data
